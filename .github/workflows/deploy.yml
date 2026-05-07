@@ -58,10 +58,11 @@ jobs:
       - name: Terraform apply (replace EC2 with new image)
         working-directory: sre-api/terraform
         env:
-          TF_VAR_api_basic_user:     ${{ secrets.API_BASIC_USER }}
-          TF_VAR_api_basic_password: ${{ secrets.API_BASIC_PASSWORD }}
+          TF_VAR_api_basic_user:            ${{ secrets.API_BASIC_USER }}
+          TF_VAR_api_basic_password:        ${{ secrets.API_BASIC_PASSWORD }}
           TF_VAR_ecr_aws_access_key_id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
           TF_VAR_ecr_aws_secret_access_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          TF_VAR_create_iam:                "false"
         run: |
           terraform apply -auto-approve \
             -var="container_tag=${{ github.sha }}"
