@@ -66,3 +66,16 @@ jobs:
         run: |
           terraform apply -auto-approve \
             -var="container_tag=${{ github.sha }}"
+
+      - name: Wait for instance refresh to complete
+        working-directory: sre-api/terraform
+        run: |
+          ASG=$(terraform output -raw asg_name)
+          echo "Waiting for instance refresh on $ASG..."
+          aws autoscaling wait instance-refresh-in-progress-removed \
+            --auto-scaling-group-name "$ASG"
+          STATUS=$(aws autoscaling describe-instance-refreshes \
+            --auto-scaling-group-name "$ASG" \
+            --query 'InstanceRefreshes[0].Status' --output text)
+          echo "Instance refresh status: $STATUS"
+          [ "$STATUS" = "Successful" ]
