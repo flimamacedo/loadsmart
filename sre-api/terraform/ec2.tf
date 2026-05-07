@@ -60,7 +60,7 @@ resource "aws_autoscaling_group" "api" {
 
   launch_template {
     id      = aws_launch_template.api.id
-    version = "$Latest"
+    version = aws_launch_template.api.latest_version
   }
 
   # Rolling replacement: swap one instance at a time, keeping ≥50% healthy.
