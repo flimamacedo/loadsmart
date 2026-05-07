@@ -26,23 +26,7 @@ aws ecr get-login-password --region "$REGION" \
 docker buildx build --platform linux/amd64 -t "$REPO_URL:$TAG" --push .
 
 echo "Pushed $REPO_URL:$TAG"
+echo "Deploying via terraform apply..."
 
-INSTANCE_ID="$(cd "$TF_DIR" && terraform output -raw api_instance_id)"
-echo "Triggering redeploy on $INSTANCE_ID..."
-
-COMMAND_ID="$(aws ssm send-command \
-  --instance-ids "$INSTANCE_ID" \
-  --document-name "AWS-RunShellScript" \
-  --parameters "commands=[\"DEPLOY_IMAGE_TAG=$TAG /usr/local/bin/redeploy-sre-api.sh\"]" \
-  --region "$REGION" \
-  --query "Command.CommandId" \
-  --output text)"
-
-echo "SSM command $COMMAND_ID sent — checking result..."
-sleep 5
-aws ssm get-command-invocation \
-  --command-id "$COMMAND_ID" \
-  --instance-id "$INSTANCE_ID" \
-  --region "$REGION" \
-  --query "[Status, StatusDetails]" \
-  --output text
+cd "$TF_DIR"
+terraform apply -auto-approve -var="container_tag=$TAG"

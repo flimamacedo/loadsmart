@@ -1,4 +1,4 @@
-# Build the Docker image, push to ECR (SHA tag; ECR is IMMUTABLE), and redeploy on EC2 via SSM.
+# Build the Docker image, push to ECR (SHA tag; ECR is IMMUTABLE), and redeploy via terraform apply.
 # Improvement: switch to GitHub OIDC + role-to-assume (see sre-api/README.md).
 name: Deploy
 
@@ -39,15 +39,14 @@ jobs:
         working-directory: sre-api/terraform
         run: terraform init
 
-      - name: Resolve Terraform outputs
+      - name: ECR login
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Resolve ECR repository URL
         id: tf
         working-directory: sre-api/terraform
-        run: |
-          echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
-          echo "instance_id=$(terraform output -raw api_instance_id)"  >> $GITHUB_OUTPUT
-
-      - name: ECR login
-        uses: aws-actions/amazon-ecr-login@v2
+        run: echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
 
       - name: Build and push
         run: |
@@ -56,25 +55,8 @@ jobs:
             --push \
             sre-api/
 
-      - name: Redeploy on EC2 via SSM
+      - name: Terraform apply (replace EC2 with new image)
+        working-directory: sre-api/terraform
         run: |
-          CMD_ID=$(aws ssm send-command \
-            --region "$AWS_REGION" \
-            --instance-ids "${{ steps.tf.outputs.instance_id }}" \
-            --document-name "AWS-RunShellScript" \
-            --comment "redeploy sre-api ${{ github.sha }}" \
-            --parameters "commands=[\"DEPLOY_IMAGE_TAG=${{ github.sha }} /usr/local/bin/redeploy-sre-api.sh\"]" \
-            --query Command.CommandId --output text)
-
-          aws ssm wait command-executed \
-            --region "$AWS_REGION" \
-            --command-id "$CMD_ID" \
-            --instance-id "${{ steps.tf.outputs.instance_id }}"
-
-          STATUS=$(aws ssm get-command-invocation \
-            --region "$AWS_REGION" \
-            --command-id "$CMD_ID" \
-            --instance-id "${{ steps.tf.outputs.instance_id }}" \
-            --query Status --output text)
-          echo "SSM status: $STATUS"
-          test "$STATUS" = "Success"
+          terraform apply -auto-approve \
+            -var="container_tag=${{ github.sha }}"

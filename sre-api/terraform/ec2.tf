@@ -8,11 +8,12 @@ data "aws_ami" "al2023" {
 }
 
 resource "aws_instance" "api" {
-  ami                    = data.aws_ami.al2023.id
-  instance_type          = var.instance_type
-  vpc_security_group_ids = [aws_security_group.app.id]
-  iam_instance_profile   = var.create_iam ? aws_iam_instance_profile.ec2[0].name : var.existing_instance_profile_name
-  subnet_id              = aws_subnet.public[0].id
+  ami                         = data.aws_ami.al2023.id
+  instance_type               = var.instance_type
+  vpc_security_group_ids      = [aws_security_group.app.id]
+  iam_instance_profile        = var.create_iam ? aws_iam_instance_profile.ec2[0].name : var.existing_instance_profile_name
+  subnet_id                   = aws_subnet.public[0].id
+  user_data_replace_on_change = true
   user_data = base64encode(templatefile("${path.module}/user-data.sh.tpl", {
     region            = var.aws_region
     ecr_registry      = split("/", aws_ecr_repository.api.repository_url)[0]
