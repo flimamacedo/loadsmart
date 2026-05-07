@@ -44,3 +44,8 @@ output "asg_name" {
   description = "Auto Scaling Group name"
   value       = aws_autoscaling_group.api.name
 }
+
+output "target_group_arn" {
+  description = "ALB target group ARN — use with describe-target-health"
+  value       = aws_lb_target_group.api.arn
+}

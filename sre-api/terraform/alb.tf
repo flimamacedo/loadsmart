@@ -1,9 +1,10 @@
 resource "aws_lb_target_group" "api" {
-  name        = local.target_group_name
-  port        = 80
-  protocol    = "HTTP"
-  vpc_id      = aws_vpc.main.id
-  target_type = "instance"
+  name                 = local.target_group_name
+  port                 = 80
+  protocol             = "HTTP"
+  vpc_id               = aws_vpc.main.id
+  target_type          = "instance"
+  deregistration_delay = 30
 
   tags = merge(local.standard_tags, {
     Name = "${local.name_prefix}-tg-api"
