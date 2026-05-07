@@ -31,9 +31,9 @@ variable "existing_instance_profile_name" {
 
 variable "alb_name" {
   type        = string
-  default     = null
+  default     = "default-alb"
   nullable    = true
-  description = "ALB name. If null, uses \"<terraform.workspace>-challange-alb\" (workspace-product). Set to default-alb if the challenge requires that exact name (32 char max)."
+  description = "ALB name. The challenge requires \"default-alb\" so that /elb/default-alb resolves. Override with null to fall back to \"<workspace>-challenge-alb\"."
 }
 
 variable "instance_type" {
