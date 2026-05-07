@@ -36,7 +36,7 @@ Examples:
 
 ```bash
 curl -i -u admin:changeme http://127.0.0.1:8080/healthcheck
-curl -s -u admin:changeme "http://127.0.0.1:8080/elb/default-alb"
+curl -s -u admin:changeme "http://127.0.0.1:8080/elb/$(terraform -chdir=sre-api/terraform output -raw alb_name)"
 ```
 
 - **`/healthcheck`** is a **public** endpoint — no auth required.
