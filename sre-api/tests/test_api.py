@@ -1,12 +1,9 @@
-from __future__ import annotations
-
 import base64
-from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
-from src.elb_service import ElbService, InstanceAlreadyRegistered, InstanceNotRegistered, MachineInfo
+from src.elb_service import InstanceAlreadyRegistered, InstanceNotRegistered, MachineInfo
 from src.main import app, _get_elb_service
 
 
@@ -40,7 +37,7 @@ class FakeElbService:
 
 
 @pytest.fixture
-def client() -> Any:
+def client():
     fake = FakeElbService()
 
     def _override_svc() -> FakeElbService:

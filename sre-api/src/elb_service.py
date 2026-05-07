@@ -1,11 +1,8 @@
 """AWS ELBv2 (ALB) + EC2 helpers for the API."""
 
-from __future__ import annotations
-
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 
 import boto3
 from botocore.exceptions import ClientError
@@ -16,6 +13,13 @@ class MachineInfo:
     instance_id: str
     instance_type: str
     launch_date: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "instanceId": self.instance_id,
+            "instanceType": self.instance_type,
+            "launchDate": self.launch_date,
+        }
 
 
 class ElbService:
@@ -33,9 +37,7 @@ class ElbService:
                 return None
             raise
         lbs = resp.get("LoadBalancers") or []
-        if not lbs:
-            return None
-        return lbs[0]["LoadBalancerArn"]
+        return lbs[0]["LoadBalancerArn"] if lbs else None
 
     def primary_target_group(self, load_balancer_arn: str) -> tuple[str, int]:
         resp = self._elbv2.describe_target_groups(LoadBalancerArn=load_balancer_arn)
@@ -55,21 +57,18 @@ class ElbService:
 
     def list_machines(self, elb_name: str) -> list[MachineInfo] | None:
         lb_arn = self.load_balancer_arn(elb_name)
-        if not lb_arn:
+        if lb_arn is None:
             return None
         tg_arn, _ = self.primary_target_group(lb_arn)
         instance_ids = sorted(self._registered_instance_ids(tg_arn))
-        if not instance_ids:
-            return []
         return self._machine_infos(instance_ids)
 
     def attach_instance(self, elb_name: str, instance_id: str) -> MachineInfo | None:
         lb_arn = self.load_balancer_arn(elb_name)
-        if not lb_arn:
+        if lb_arn is None:
             return None
         tg_arn, port = self.primary_target_group(lb_arn)
-        registered = self._registered_instance_ids(tg_arn)
-        if instance_id in registered:
+        if instance_id in self._registered_instance_ids(tg_arn):
             raise InstanceAlreadyRegistered(instance_id)
         try:
             self._elbv2.register_targets(
@@ -77,7 +76,10 @@ class ElbService:
                 Targets=[{"Id": instance_id, "Port": port}],
             )
         except ClientError as e:
-            raise _map_register_error(e) from e
+            code = e.response.get("Error", {}).get("Code", "")
+            if code in ("InvalidTarget", "ValidationError"):
+                raise ValueError(e.response["Error"]["Message"]) from e
+            raise
         infos = self._machine_infos([instance_id])
         if not infos:
             raise RuntimeError("Instance registered but EC2 describe returned no data")
@@ -85,11 +87,10 @@ class ElbService:
 
     def detach_instance(self, elb_name: str, instance_id: str) -> MachineInfo | None:
         lb_arn = self.load_balancer_arn(elb_name)
-        if not lb_arn:
+        if lb_arn is None:
             return None
         tg_arn, port = self.primary_target_group(lb_arn)
-        registered = self._registered_instance_ids(tg_arn)
-        if instance_id not in registered:
+        if instance_id not in self._registered_instance_ids(tg_arn):
             raise InstanceNotRegistered(instance_id)
         self._elbv2.deregister_targets(
             TargetGroupArn=tg_arn,
@@ -112,13 +113,11 @@ class ElbService:
                 launch = inst.get("LaunchTime")
                 if not iid or not itype or not launch:
                     continue
-                out.append(
-                    MachineInfo(
-                        instance_id=iid,
-                        instance_type=itype,
-                        launch_date=_iso_z(launch),
-                    )
-                )
+                out.append(MachineInfo(
+                    instance_id=iid,
+                    instance_type=itype,
+                    launch_date=_iso_z(launch),
+                ))
         out.sort(key=lambda m: m.instance_id)
         return out
 
@@ -139,19 +138,3 @@ class InstanceAlreadyRegistered(Exception):
 class InstanceNotRegistered(Exception):
     def __init__(self, instance_id: str) -> None:
         self.instance_id = instance_id
-
-
-def _map_register_error(e: ClientError) -> Exception:
-    code = e.response.get("Error", {}).get("Code", "")
-    if code in ("InvalidTarget", "ValidationError"):
-        return ValueError(e.response.get("Error", {}).get("Message", str(e)))
-    return e
-
-
-def machine_info_to_schema(m: MachineInfo) -> dict[str, Any]:
-    return {
-        "instanceId": m.instance_id,
-        "instanceType": m.instance_type,
-        "launchDate": m.launch_date,
-    }
-
