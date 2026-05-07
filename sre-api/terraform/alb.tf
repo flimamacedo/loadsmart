@@ -38,9 +38,27 @@ resource "aws_lb_listener" "http" {
   port              = 80
   protocol          = "HTTP"
 
+  # Redirect to HTTPS when a certificate is configured; otherwise forward directly.
   default_action {
-    type             = "forward"
-    target_group_arn = aws_lb_target_group.api.arn
+    type = var.domain_name != null ? "redirect" : "forward"
+
+    dynamic "redirect" {
+      for_each = var.domain_name != null ? [1] : []
+      content {
+        port        = "443"
+        protocol    = "HTTPS"
+        status_code = "HTTP_301"
+      }
+    }
+
+    dynamic "forward" {
+      for_each = var.domain_name == null ? [1] : []
+      content {
+        target_group {
+          arn = aws_lb_target_group.api.arn
+        }
+      }
+    }
   }
 }
 

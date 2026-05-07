@@ -16,6 +16,10 @@ output "public_subnet_ids" {
   value = aws_subnet.public[*].id
 }
 
+output "private_subnet_ids" {
+  value = aws_subnet.private[*].id
+}
+
 output "alb_name" {
   description = "Application load balancer name (use in API /elb/{name} and DNS)"
   value       = aws_lb.api.name
@@ -36,6 +40,7 @@ output "ecr_repository_url" {
   value       = aws_ecr_repository.api.repository_url
 }
 
-output "api_instance_id" {
-  value = aws_instance.api.id
+output "asg_name" {
+  description = "Auto Scaling Group name"
+  value       = aws_autoscaling_group.api.name
 }
