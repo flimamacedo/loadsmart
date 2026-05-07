@@ -7,6 +7,7 @@ import secrets
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
+from botocore.exceptions import BotoCoreError, ClientError
 from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -30,6 +31,25 @@ async def _lifespan(app: FastAPI):
 app = FastAPI(title="Site Reliable Engineer Test", version="1.0.0", lifespan=_lifespan)
 
 _basic = HTTPBasic(auto_error=False)
+
+
+@app.exception_handler(ClientError)
+async def _aws_client_error(request: Request, exc: ClientError) -> JSONResponse:
+    _ = request
+    msg = exc.response.get("Error", {}).get("Message", str(exc))
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": f"AWS error: {msg}"},
+    )
+
+
+@app.exception_handler(BotoCoreError)
+async def _aws_botocore_error(request: Request, exc: BotoCoreError) -> JSONResponse:
+    _ = request
+    return JSONResponse(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        content={"detail": f"AWS error: {exc}"},
+    )
 
 
 @app.exception_handler(RequestValidationError)

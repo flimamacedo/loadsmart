@@ -12,7 +12,6 @@ Run from the **`sre-api/`** directory (not the git repo root — that is where `
 cd sre-api
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements-dev.txt
-export API_BASIC_USER=admin API_BASIC_PASSWORD=changeme
 pytest
 ```
 
@@ -37,7 +36,7 @@ Examples:
 
 ```bash
 curl -i -u admin:changeme http://127.0.0.1:8080/healthcheck
-curl -s -u admin:changeme "http://127.0.0.1:8080/elb/default-alb"   # use terraform output -raw alb_name if you did not set alb_name = "default-alb"
+curl -s -u admin:changeme "http://127.0.0.1:8080/elb/default-alb"
 ```
 
 - **`/healthcheck`** is a **public** endpoint — no auth required.
@@ -45,7 +44,18 @@ curl -s -u admin:changeme "http://127.0.0.1:8080/elb/default-alb"   # use terraf
 
 ### 3. Docker Compose
 
-`docker compose up --build` maps **8080→8080** and mounts **`~/.aws`** read-only so boto3 can use your local profile. Set `API_BASIC_USER` / `API_BASIC_PASSWORD` in the environment (see `docker-compose.yml`). If you do not have `~/.aws`, comment out the `volumes` block and pass keys via environment (not ideal for daily use).
+`docker compose up --build` maps **8080→8080**. AWS credentials are passed via environment variables. Export them before running:
+
+```bash
+export AWS_DEFAULT_REGION=us-east-1
+export AWS_ACCESS_KEY_ID=...
+export AWS_SECRET_ACCESS_KEY=...
+export API_BASIC_USER=admin
+export API_BASIC_PASSWORD=changeme
+docker compose up --build
+```
+
+Credentials are read by boto3 at runtime from the container's environment.
 
 ## Container
 
@@ -55,7 +65,8 @@ docker run --rm -p 8080:8080 \
   -e AWS_DEFAULT_REGION=us-east-1 \
   -e API_BASIC_USER=admin \
   -e API_BASIC_PASSWORD=changeme \
-  -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e AWS_SESSION_TOKEN \
+  -e AWS_ACCESS_KEY_ID \
+  -e AWS_SECRET_ACCESS_KEY \
   sre-api:local
 ```
 
@@ -69,14 +80,13 @@ Infra lives in `terraform/`. Resource names follow:
 
 `product` is defined in code (`terraform/locals.tf` → `challenge`). The **first segment** is the **Terraform workspace** name, e.g. `development` → `development-challenge-api`, `development-challenge-alb`. Resource tags still include `Environment`, which is set to the workspace name.
 
-- **Networking (dedicated, not default VPC):** VPC **`{prefix}-vpc`**, Internet Gateway **`{prefix}-igw`**, **`public_subnet_count`** public subnets (**`{prefix}-subnet-public-N`**) in the first N availability zones, public route table **`{prefix}-rt-public`** (`0.0.0.0/0` → IGW). Default **`vpc_cidr`** is `10.0.0.0/16`; subnets use `cidrsubnet(vpc_cidr, 8, 1..N)` (e.g. `10.0.1.0/24`, `10.0.2.0/24`). ALB spans all public subnets; the API instance uses the first subnet and gets a public IP for ECR/Docker bootstrap.
-- **ALB:** default name is **`{prefix}-alb`**. The written challenge may ask for **`default-alb`** — set `alb_name = "default-alb"` in `terraform.tfvars` if you need that exact string; otherwise call the API with `/elb/<your-alb-name>` from `terraform output -raw alb_name`.
-- Target group (HTTP on 80) with **HTTP** health check on **`/healthcheck`**; matcher **`200`** (healthcheck is a public endpoint, no credentials needed).
-- One EC2 instance (default `t3.micro`) in the new VPC, registered to that target group
-- ECR repository **`{prefix}-api`** (tag-**immutable**; push with SHA tags)
-- SSM Parameter Store: `/{prefix}/api/basic_user` and `/{prefix}/api/basic_password` (SecureString), `/{prefix}/api/image_tag` (String) — credentials never stored in instance user-data or metadata
-- IAM instance profile: ECR pull + ELBv2 describe/register/deregister + `ec2:DescribeInstances` + `ssm:GetParameter` on those three parameters + `kms:Decrypt` on the SSM-managed key
-- **Optional HTTPS:** set `domain_name = "api.example.com"` in `terraform.tfvars` to create an ACM certificate (DNS validation) and an HTTPS listener on port 443. Run `terraform output acm_validation_records` to get the DNS records to create, then they are validated automatically by ACM.
+- **Networking (dedicated, not default VPC):** VPC, Internet Gateway, `public_subnet_count` **public** subnets for the ALB + matching **private** subnets for compute (default `10.0.1–2.0/24` public, `10.0.11–12.0/24` private). A **NAT Gateway** in the first public subnet provides outbound internet access (ECR pulls) from the private subnets.
+- **ALB:** name defaults to **`default-alb`** (required by the challenge). Spans all public subnets. HTTP redirects to HTTPS when `domain_name` is set.
+- Target group (HTTP on 80) with health check on **`/healthcheck`**; matcher `200` (public endpoint, no credentials needed). `deregistration_delay = 30s`.
+- **Auto Scaling Group:** desired 2, min 1, max 4 — instances in private subnets across AZs. CPU target-tracking policy (60%). Rolling instance refresh on every deploy (min 50% healthy).
+- ECR repository **`{prefix}-api`** (tag-**immutable**; SHA tags only)
+- IAM instance profile: ECR pull + ELBv2 describe/register/deregister + `ec2:DescribeInstances` + SSM Session Manager (`AmazonSSMManagedInstanceCore`)
+- **Optional HTTPS:** set `domain_name = "api.example.com"` in `terraform.tfvars` to create an ACM certificate (DNS validation) and an HTTPS listener on port 443.
 
 ### Workspaces
 
@@ -138,7 +148,7 @@ terraform init
 | Piece | What you have |
 |--------|----------------|
 | **GitHub — `terraform.yml`** | On PR/push to `main` when `sre-api/terraform/**` changes: **`terraform fmt -check`**, **`init -backend=false`**, **`validate`**. No AWS credentials; safe on forks. |
-| **App deploy — `deploy.yml`** | Builds Docker image, pushes to **ECR**, optional **SSM** redeploy. That is **application** CD, not Terraform. |
+| **App deploy — `deploy.yml`** | Builds Docker image, pushes to **ECR** (SHA tag), `terraform apply` → ASG rolling instance refresh. |
 
 **Optional: `terraform plan` / `apply` in GitHub** (typical production pattern):
 
@@ -154,32 +164,23 @@ For this repo, keeping **fmt + validate in CI** and running **plan/apply locally
 1. Copy `terraform/terraform.tfvars.example` → `terraform/terraform.tfvars` and set credentials (do **not** commit real secrets).
 2. `cd terraform && terraform init` (or `terraform init -backend=false` for local state only), then pick a workspace (see above).
 3. `terraform apply`
-4. Build and push the image (requires AWS CLI credentials on your workstation):
+4. Build and push the image, then apply again with the new tag:
 
    ```bash
-   ./scripts/build_and_push.sh <tag>   # e.g. ./scripts/build_and_push.sh abc1234
+   TAG=$(git rev-parse --short HEAD)
+   ./scripts/build_and_push.sh $TAG
+   terraform apply -var="container_tag=$TAG"
    ```
 
-   ECR is tag-immutable; use a unique tag (git SHA recommended). The instance reads the active tag from SSM (`/{prefix}/api/image_tag`) — update it after pushing:
-
-   ```bash
-   aws ssm put-parameter --name "$(terraform output -raw ssm_image_tag_param)" \
-     --value "<tag>" --overwrite
-   ```
-
-   Then redeploy: `sudo DEPLOY_IMAGE_TAG=<tag> /usr/local/bin/redeploy-sre-api.sh` via Session Manager.
+   ECR tags are immutable — always use a unique tag (git SHA). `terraform apply` updates the launch template version, which triggers an ASG rolling instance refresh automatically.
 
 5. Hit `http://$(terraform output -raw alb_dns_name)/healthcheck` — no auth required.
 
-Outputs **`vpc_id`**, **`vpc_cidr`**, **`public_subnet_ids`**, **`ssm_image_tag_param`**, and **`acm_validation_records`** are available for debugging or setup.
+Available outputs: `vpc_id`, `vpc_cidr`, `public_subnet_ids`, `private_subnet_ids`, `alb_name`, `alb_dns_name`, `ecr_repository_url`, `asg_name`, `target_group_arn`.
 
-**Costs:** ALB is usually not Free Tier; use a dev account and `terraform destroy` when you are done.
+**Costs:** ALB (~$16/mo) + NAT Gateway (~$32/mo) are not Free Tier. Run `terraform destroy` when done.
 
-**New image on an existing instance:** Push the image, update the SSM image-tag parameter (see step 4 above), then run `sudo /usr/local/bin/redeploy-sre-api.sh` on the instance via Session Manager. The script fetches the active tag from SSM automatically. To pin a specific tag: `sudo DEPLOY_IMAGE_TAG=<sha> /usr/local/bin/redeploy-sre-api.sh`. If the script is missing, run `terraform apply -replace='module.sre_challenge_stack.aws_instance.api'` once to recreate the host from current user data.
-
-**Layout:** Composition lives in `terraform/main.tf`; the stack is module `sre_challenge_stack` under `terraform/modules/sre_challenge_stack/` (split `.tf` files: `network.tf`, `alb.tf`, `ec2.tf`, `ecr.tf`, `iam.tf`, `ssm.tf`, `security_groups.tf`, `locals.tf`). User-data template is inside that module.
-
-**Instance refresh:** If you applied Terraform before the SSM/redeploy user-data changes, run `terraform apply -replace='module.sre_challenge_stack.aws_instance.api'` once so the instance gets `/usr/local/bin/redeploy-sre-api.sh` and the SSM instance profile attachment.
+**Layout:** `terraform/` contains flat `.tf` files: `network.tf`, `alb.tf`, `ec2.tf`, `ecr.tf`, `iam.tf`, `security_groups.tf`, `checks.tf`, `locals.tf`, `variables.tf`, `outputs.tf`. User-data template is `user-data.sh.tpl`.
 
 ## GitHub Actions
 
@@ -241,7 +242,7 @@ flowchart TD
 **`deploy.yml`** uses **long-lived or temporary IAM user/access keys** via secrets (simplest to start). Create an IAM user (or role + assumed keys) whose policy allows:
 
 - **ECR push:** `ecr:GetAuthorizationToken` on `*`; `ecr:BatchCheckLayerAvailability`, `ecr:CompleteLayerUpload`, `ecr:GetDownloadUrlForLayer`, `ecr:InitiateLayerUpload`, `ecr:PutImage`, `ecr:UploadLayerPart`, `ecr:BatchGetImage` on your repository ARN.
-- **Optional** (SSM redeploy step): `ssm:SendCommand`, `ssm:GetCommandInvocation`, `ssm:ListCommandInvocations`, `ssm:DescribeInstanceInformation` (narrow to your instance if you can).
+- **Terraform apply:** permissions to manage VPC, EC2, ELB, ECR, IAM, and Auto Scaling resources.
 
 **Repository secrets**
 
@@ -249,23 +250,20 @@ flowchart TD
 |--------|----------|---------|
 | `AWS_ACCESS_KEY_ID` | yes | IAM access key |
 | `AWS_SECRET_ACCESS_KEY` | yes | IAM secret key |
-| `AWS_SESSION_TOKEN` | no | Include only for **temporary** credentials (STS/MFA) |
-| `EC2_INSTANCE_ID` | no | If set, workflow runs SSM redeploy after push |
+| `API_BASIC_USER` | yes | Passed to Terraform as `TF_VAR_api_basic_user` |
+| `API_BASIC_PASSWORD` | yes | Passed to Terraform as `TF_VAR_api_basic_password` |
 
 **Repository variables** *(optional)*
 
 - `AWS_REGION` — defaults to `us-east-1` in the workflow if unset.
-- `ECR_REPOSITORY_NAME` — must match `terraform output -raw ecr_repository_name` (format: `<workspace>-challenge-api`, e.g. `dev-challenge-api`).
-- `SSM_IMAGE_TAG_PARAM` — must match `terraform output -raw ssm_image_tag_param`. When set, the workflow updates the parameter with the deployed commit SHA after each push.
-
-When `EC2_INSTANCE_ID` is set, the workflow runs `sudo DEPLOY_IMAGE_TAG=<commit-sha> /usr/local/bin/redeploy-sre-api.sh` on that instance.
+- `TF_WORKSPACE` — Terraform workspace to select (defaults to `dev`).
 
 ### Improvement: GitHub OIDC (no long-lived keys)
 
 Prefer **OIDC** so GitHub assumes an IAM role and you never store access keys in secrets:
 
 1. Create an IAM OIDC provider for `token.actions.githubusercontent.com` and a role with trust limited to your repo (e.g. `sub` like `repo:ORG/REPO:ref:refs/heads/main`).
-2. Attach the same ECR (+ optional SSM) policy to that role.
+2. Attach the ECR push + Terraform apply policy to that role.
 3. In `deploy.yml`, replace the **Configure AWS** step with `role-to-assume: ${{ secrets.AWS_ROLE_ARN }}` and add top-level `permissions: id-token: write` (plus `contents: read`). Remove the access-key inputs from `configure-aws-credentials`.
 
 Rotate or delete the IAM user keys once OIDC is working.
