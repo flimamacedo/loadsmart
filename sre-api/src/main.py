@@ -78,8 +78,8 @@ class MachineIdBody(BaseModel):
 
 
 @app.get("/healthcheck", tags=["health"])
-def healthcheck() -> Response:
-    return Response(status_code=status.HTTP_200_OK)
+def healthcheck() -> dict[str, str]:
+    return {"version": os.environ.get("APP_VERSION", "unknown")}
 
 
 @app.get("/elb/{elb_name}", tags=["elb"])

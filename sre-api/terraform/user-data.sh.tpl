@@ -45,6 +45,7 @@ docker run -d --name sre-api --restart unless-stopped -p 80:8080 \
   -e AWS_SECRET_ACCESS_KEY="$${AWS_SECRET_ACCESS_KEY:-}" \
   -e API_BASIC_USER="$API_BASIC_USER" \
   -e API_BASIC_PASSWORD="$API_BASIC_PASSWORD" \
+  -e APP_VERSION="$IMAGE_TAG" \
   "$IMAGE"
 EOS
 chmod 755 /usr/local/bin/redeploy-sre-api.sh

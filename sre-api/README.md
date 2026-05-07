@@ -189,7 +189,52 @@ Workflows live in [`.github/workflows/`](../.github/workflows/).
 |----------|------|----------------|
 | `ci.yml` | PR / push to `main` (paths under `sre-api/`) | `pytest` |
 | `terraform.yml` | PR / push to `main` (paths under `sre-api/terraform/`) | `terraform fmt -check` → `init -backend=false` → `validate` |
-| `deploy.yml` | Push to `main` (same paths) or **Run workflow** | Docker build → push to ECR (**SHA tag only**; ECR is IMMUTABLE) → update SSM image-tag param → optional SSM redeploy on EC2 |
+| `deploy.yml` | Push to `main` (same paths) or **Run workflow** | Docker build → push to ECR (**SHA tag only**; ECR is IMMUTABLE) → `terraform apply` → ASG rolling refresh |
+
+```mermaid
+flowchart TD
+    trigger["Push to main or workflow_dispatch"]
+
+    trigger --> ci
+    trigger --> tf
+    trigger --> deploy
+
+    subgraph ci["ci.yml — Unit Tests"]
+        direction TB
+        ci1["Setup Python 3.12"]
+        ci2["pip install requirements-dev.txt"]
+        ci3["pytest — no AWS credentials needed"]
+        ci1 --> ci2 --> ci3
+    end
+
+    subgraph tf["terraform.yml — IaC Validation"]
+        direction TB
+        tf1["Setup Terraform 1.10"]
+        tf2["terraform fmt -check"]
+        tf3["terraform init -backend=false"]
+        tf4["terraform validate — no AWS credentials needed"]
+        tf1 --> tf2 --> tf3 --> tf4
+    end
+
+    subgraph deploy["deploy.yml — Build & Deploy"]
+        direction TB
+        d1["Configure AWS credentials"]
+        d2["terraform init — connects to S3 backend"]
+        d3["ECR login"]
+        d4["Resolve ECR URL via terraform output"]
+        d5["docker buildx build --push\ntag: GITHUB_SHA"]
+        d6["terraform apply -var container_tag=GITHUB_SHA\nnew launch template version created"]
+        d7["ASG rolling instance refresh triggered\none instance at a time — 50% min healthy"]
+        d8["Poll describe-instance-refreshes every 30s"]
+        d9{"Refresh status?"}
+        d10["Deploy complete"]
+        d11["Workflow fails"]
+        d1 --> d2 --> d3 --> d4 --> d5 --> d6 --> d7 --> d8 --> d9
+        d9 -->|Successful| d10
+        d9 -->|Failed / Cancelled| d11
+        d9 -->|InProgress / Pending| d8
+    end
+```
 
 ### Configure GitHub (deploy workflow)
 
