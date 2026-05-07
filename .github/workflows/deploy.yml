@@ -78,8 +78,8 @@ jobs:
               --query 'InstanceRefreshes[0].Status' --output text)
             echo "[$i/60] $STATUS"
             case "$STATUS" in
-              Successful)
-                echo "Instance refresh completed successfully."; exit 0 ;;
+              Successful|None)
+                echo "Done (status: $STATUS)."; exit 0 ;;
               Failed|Cancelled|RollbackFailed|RollbackSuccessful)
                 echo "Instance refresh ended with: $STATUS"; exit 1 ;;
               InProgress|Pending|Cancelling|RollbackInProgress)
