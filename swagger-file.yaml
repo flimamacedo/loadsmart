@@ -1,0 +1,105 @@
+swagger: '2.0'
+info:
+  description: SRE Test - Loadsmart
+  version: 1.0.0
+  title: Site Reliable Engineer Test
+  contact:
+    email: jobs@loadsmart.com
+security:
+  - basicAuth: []
+paths:
+  '/healthcheck':
+    get:
+      description: API health check
+      security: []
+      responses:
+        200:
+          description: the service is up
+  '/elb/{elbName}':
+    get:
+      operationId: listMachinesElb
+      description: List machines attached to a particular load balancer
+      produces:
+        - application/json
+      responses:
+        '200':
+          description: machines listed
+          schema:
+            type: array
+            items:
+              $ref: '#/definitions/MachineInfo'
+        '404':
+          description: the elb does not exist
+    post:
+      operationId: attachInstance
+      description: Attach an instance on the load balancer
+      consumes:
+        - application/json
+      produces:
+        - application/json
+      parameters:
+        - in: body
+          name: machineId
+          description: instance identifier
+          schema:
+            $ref: '#/definitions/MachineId'
+      responses:
+        '201':
+          description: instance added
+          schema:
+            $ref: '#/definitions/MachineInfo'
+        '400':
+          description: wrong data format
+        '409':
+          description: instance already on load balancer
+    delete:
+      description: Detach an instance from the load balancer
+      parameters:
+        - in: body
+          name: machineId
+          description: instance identifier
+          schema:
+            $ref: '#/definitions/MachineId'
+      responses:
+        '201':
+          description: instance removed
+          schema:
+            $ref: '#/definitions/MachineInfo'
+        '400':
+          description: wrong data format
+        '409':
+          description: instance is not on load balancer
+    parameters:
+      - name: elbName
+        in: path
+        required: true
+        description: pass the load balancer name
+        type: string
+securityDefinitions:
+  basicAuth:
+    type: basic
+definitions:
+  MachineInfo:
+    type: object
+    required:
+      - instanceId
+      - instanceType
+      - launchDate
+    properties:
+      instanceId:
+        type: string
+        example: i-5203422c
+      instanceType:
+        type: string
+        example: t1.micro
+      launchDate:
+        type: string
+        example: '2016-08-29T09:12:33.001Z'
+  MachineId:
+    type: object
+    required:
+      - instanceId
+    properties:
+      instanceId:
+        type: string
+        example: i-5203422c

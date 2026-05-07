@@ -1,0 +1,41 @@
+# Terraform CI: formatting + configuration validation (no AWS calls).
+# For plan/apply in GitHub, add remote state + OIDC or secrets — see sre-api/README.md → "Terraform in CI/CD".
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - "sre-api/terraform/**"
+      - ".github/workflows/terraform.yml"
+  push:
+    branches: [main]
+    paths:
+      - "sre-api/terraform/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: fmt (check)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sre-api/terraform
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+
+      - name: terraform fmt (check)
+        run: terraform fmt -check -recursive
+
+      - name: terraform init (no backend)
+        run: terraform init -backend=false
+
+      - name: terraform validate
+        run: terraform validate

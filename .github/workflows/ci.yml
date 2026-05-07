@@ -1,0 +1,38 @@
+# Runs API tests on changes under sre-api/
+name: CI
+
+on:
+  pull_request:
+    paths:
+      - "sre-api/**"
+      - ".github/workflows/ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "sre-api/**"
+      - ".github/workflows/ci.yml"
+
+defaults:
+  run:
+    working-directory: sre-api
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: sre-api/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Pytest
+        env:
+          API_BASIC_USER: ci
+          API_BASIC_PASSWORD: ci
+        run: pytest

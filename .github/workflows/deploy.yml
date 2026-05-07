@@ -1,0 +1,80 @@
+# Build the Docker image, push to ECR (SHA tag; ECR is IMMUTABLE), and redeploy on EC2 via SSM.
+# Improvement: switch to GitHub OIDC + role-to-assume (see sre-api/README.md).
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "sre-api/**"
+      - ".github/workflows/deploy.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-1' }}
+      TF_WORKSPACE: ${{ vars.TF_WORKSPACE || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.9.0"
+          terraform_wrapper: false
+
+      - name: Terraform init
+        working-directory: sre-api/terraform
+        run: terraform init
+
+      - name: Resolve Terraform outputs
+        id: tf
+        working-directory: sre-api/terraform
+        run: |
+          echo "ecr_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
+          echo "instance_id=$(terraform output -raw api_instance_id)"  >> $GITHUB_OUTPUT
+
+      - name: ECR login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        run: |
+          docker buildx build --platform linux/amd64 \
+            -t "${{ steps.tf.outputs.ecr_url }}:${{ github.sha }}" \
+            --push \
+            sre-api/
+
+      - name: Redeploy on EC2 via SSM
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --region "$AWS_REGION" \
+            --instance-ids "${{ steps.tf.outputs.instance_id }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "redeploy sre-api ${{ github.sha }}" \
+            --parameters "commands=[\"DEPLOY_IMAGE_TAG=${{ github.sha }} /usr/local/bin/redeploy-sre-api.sh\"]" \
+            --query Command.CommandId --output text)
+
+          aws ssm wait command-executed \
+            --region "$AWS_REGION" \
+            --command-id "$CMD_ID" \
+            --instance-id "${{ steps.tf.outputs.instance_id }}"
+
+          STATUS=$(aws ssm get-command-invocation \
+            --region "$AWS_REGION" \
+            --command-id "$CMD_ID" \
+            --instance-id "${{ steps.tf.outputs.instance_id }}" \
+            --query Status --output text)
+          echo "SSM status: $STATUS"
+          test "$STATUS" = "Success"

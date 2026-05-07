@@ -1,0 +1,9 @@
+aws_region            = "us-east-1"
+vpc_cidr              = "10.0.0.0/16"
+public_subnet_count   = 2
+# alb_name            = "default-alb"  # uncomment for exact challenge ALB name
+api_basic_user     = "admin"
+api_basic_password = "change-me-use-strong-secret"
+instance_type      = "t3.micro"
+container_tag      = "v1.0.0"
+# domain_name        = "api.example.com"  # set to enable HTTPS via ACM (DNS validation required)

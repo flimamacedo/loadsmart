@@ -1,0 +1,5 @@
+FastAPI + uvicorn implement the OpenAPI contract; /healthcheck is public, ELB routes require HTTP Basic auth.
+ELBv2 and EC2 back list/attach/detach via the first target group on the named ALB plus DescribeInstances for MachineInfo fields.
+Terraform provisions ALB `default-alb`, HTTP target group on port 80, EC2, ECR (IMMUTABLE tags), IAM, and SSM SecureString parameters for credentials; user-data fetches secrets from SSM at runtime.
+Tests use FastAPI TestClient with a fake ELB layer so CI stays AWS-free.
+After apply, push image with a SHA tag, update the SSM image-tag parameter, then use the ALB DNS on port 80; run `terraform destroy` when idle.
