@@ -58,6 +58,7 @@ jobs:
       - name: Terraform apply (replace EC2 with new image)
         working-directory: sre-api/terraform
         env:
+          TF_VAR_alb_name:                  "default-alb"
           TF_VAR_api_basic_user:            ${{ secrets.API_BASIC_USER }}
           TF_VAR_api_basic_password:        ${{ secrets.API_BASIC_PASSWORD }}
           TF_VAR_ecr_aws_access_key_id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
