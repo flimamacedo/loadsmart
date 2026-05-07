@@ -154,3 +154,4 @@ def machine_info_to_schema(m: MachineInfo) -> dict[str, Any]:
         "instanceType": m.instance_type,
         "launchDate": m.launch_date,
     }
+
