@@ -72,10 +72,21 @@ jobs:
         run: |
           ASG=$(terraform output -raw asg_name)
           echo "Waiting for instance refresh on $ASG..."
-          aws autoscaling wait instance-refresh-in-progress-removed \
-            --auto-scaling-group-name "$ASG"
-          STATUS=$(aws autoscaling describe-instance-refreshes \
-            --auto-scaling-group-name "$ASG" \
-            --query 'InstanceRefreshes[0].Status' --output text)
-          echo "Instance refresh status: $STATUS"
-          [ "$STATUS" = "Successful" ]
+          for i in $(seq 1 60); do
+            STATUS=$(aws autoscaling describe-instance-refreshes \
+              --auto-scaling-group-name "$ASG" \
+              --query 'InstanceRefreshes[0].Status' --output text)
+            echo "[$i/60] $STATUS"
+            case "$STATUS" in
+              Successful)
+                echo "Instance refresh completed successfully."; exit 0 ;;
+              Failed|Cancelled|RollbackFailed|RollbackSuccessful)
+                echo "Instance refresh ended with: $STATUS"; exit 1 ;;
+              InProgress|Pending|Cancelling|RollbackInProgress)
+                sleep 30 ;;
+              *)
+                echo "Unexpected status: $STATUS"; exit 1 ;;
+            esac
+          done
+          echo "Timed out after 30 minutes waiting for instance refresh"
+          exit 1
